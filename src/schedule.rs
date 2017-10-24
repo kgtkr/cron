@@ -1,7 +1,6 @@
 use nom::*;
 use std::str::{self, FromStr};
 use std::collections::BTreeSet;
-use std::collections::Bound::{Included, Unbounded};
 use chrono::{Utc, DateTime, Duration, Datelike, Timelike};
 use chrono::offset::TimeZone;
 use std::iter::{self, Iterator};
@@ -71,86 +70,62 @@ impl Schedule {
     fn next_after<Z>(&self, after: &DateTime<Z>) -> Option<DateTime<Z>>
         where Z: TimeZone
     {
-        let datetime = after.clone() + Duration::seconds(1);
+        use chrono::Duration;
+        let mut datetime = after.clone() + Duration::seconds(1);
 
-        // The first time we iterate through the options for each time unit, we should start with
-        // the current value of each unit from the provided datetime. (e.g. if the datetime is
-        // Dec 3, we should start at month=12, day=3. When we exhaust that month, we should start
-        // over the next year with month=1, day=1.
-
-        let mut month_starts = once_and_then(datetime.month(), Months::inclusive_min());
-        let mut day_of_month_starts = once_and_then(datetime.day(), DaysOfMonth::inclusive_min());
-        let mut hour_starts = once_and_then(datetime.hour(), Hours::inclusive_min());
-        let mut minute_starts = once_and_then(datetime.minute(), Minutes::inclusive_min());
-        let mut second_starts = once_and_then(datetime.second(), Seconds::inclusive_min());
-
-        //    println!("Looking for next schedule time after {}", after.to_rfc3339());
-        for year in self.years
-                .ordinals()
-                .range((Included(datetime.year() as u32), Unbounded))
-                .cloned() {
-
-            let month_start = month_starts.next().unwrap();
-            let month_end = Months::inclusive_max();
-            let month_range = (Included(month_start), Included(month_end));
-
-            for month in self.months.ordinals().range(month_range).cloned() {
-
-                let day_of_month_start = day_of_month_starts.next().unwrap();
-                let day_of_month_end = days_in_month(month, year);
-                let day_of_month_range = (Included(day_of_month_start), Included(day_of_month_end));
-
-                'day_loop: for day_of_month in self.days_of_month
-                                   .ordinals()
-                                   .range(day_of_month_range)
-                                   .cloned() {
-
-                    let hour_start = hour_starts.next().unwrap();
-                    let hour_end = Hours::inclusive_max();
-                    let hour_range = (Included(hour_start), Included(hour_end));
-
-                    for hour in self.hours.ordinals().range(hour_range).cloned() {
-
-                        let minute_start = minute_starts.next().unwrap();
-                        let minute_end = Minutes::inclusive_max();
-                        let minute_range = (Included(minute_start), Included(minute_end));
-
-                        for minute in self.minutes.ordinals().range(minute_range).cloned() {
-
-                            let second_start = second_starts.next().unwrap();
-                            let second_end = Seconds::inclusive_max();
-                            let second_range = (Included(second_start), Included(second_end));
-
-                            for second in self.seconds.ordinals().range(second_range).cloned() {
-                                let timezone = datetime.timezone();
-                                let candidate = timezone
-                                    .ymd(year as i32, month, day_of_month)
-                                    .and_hms(hour, minute, second);
-                                if !self.days_of_week
-                                        .ordinals()
-                                        .contains(&candidate.weekday().number_from_sunday()) {
-                                    continue 'day_loop;
-                                }
-                                return Some(candidate);
-                            }
-                        } // End of minutes range
-                        let _ = second_starts.next().unwrap();
-                    } // End of hours range
-                    let _ = minute_starts.next().unwrap();
-                    let _ = second_starts.next().unwrap();
-                } // End of Day of Month range
-                let _ = hour_starts.next().unwrap();
-                let _ = minute_starts.next().unwrap();
-                let _ = second_starts.next().unwrap();
-            } // End of Month range
-            let _ = day_of_month_starts.next().unwrap();
-            let _ = hour_starts.next().unwrap();
-            let _ = minute_starts.next().unwrap();
-            let _ = second_starts.next().unwrap();
+        loop {
+            let year = datetime.year();
+            if self.years.ordinals().range((year as u32)..).next().is_none() {
+                return None;
+            }
+            if !self.years.ordinals().contains(&(year as u32)) {
+                datetime = after.timezone().ymd(year+1, 1, 1).and_hms(0, 0, 0);
+                continue;
+            }
+            let month = datetime.month();
+            if !self.months.ordinals().contains(&month) {
+                datetime = if month == 12 {
+                    after.timezone().ymd(year+1, 1, 1).and_hms(0, 0, 0)
+                } else {
+                    after.timezone().ymd(year, month+1, 1).and_hms(0, 0, 0)
+                };
+                continue;
+            }
+            if !self.days_of_month.ordinals().contains(&datetime.day()) {
+                datetime = datetime + Duration::days(1);
+                datetime = datetime
+                    .with_second(0)
+                    .and_then(|datetime| datetime.with_minute(0))
+                    .and_then(|datetime| datetime.with_hour(0))
+                    .unwrap();
+                continue;
+            }
+            if !self.days_of_week.ordinals().contains(&datetime.weekday().number_from_sunday()) {
+                datetime = datetime + Duration::days(1);
+                datetime = datetime
+                    .with_second(0)
+                    .and_then(|datetime| datetime.with_minute(0))
+                    .and_then(|datetime| datetime.with_hour(0))
+                    .unwrap();
+                continue;
+            }
+            if !self.hours.ordinals().contains(&datetime.hour()) {
+                datetime = datetime + Duration::hours(1);
+                datetime = datetime.with_second(0).and_then(|datetime| datetime.with_minute(0)).unwrap();
+                continue;
+            }
+            if !self.minutes.ordinals().contains(&datetime.minute()) {
+                datetime = datetime + Duration::minutes(1);
+                datetime = datetime.with_second(0).unwrap();
+                continue;
+            }
+            if !self.seconds.ordinals().contains(&datetime.second()) {
+                datetime = datetime + Duration::seconds(1);
+                continue;
+            }
+            break;
         }
-
-        // We ran out of dates to try.
-        None
+        datetime.with_nanosecond(0)
     }
 
   /// Provides an iterator which will return each DateTime that matches the schedule starting with
