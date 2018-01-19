@@ -1,8 +1,8 @@
 [package]
-name = "cron"
+name = "cron-bugfix-version"
 version = "0.4.0"
 authors = ["Zack Slayton <zack.slayton@gmail.com>"]
-repository = "https://github.com/zslayton/cron"
+repository = "https://github.com/kgtkr/cron"
 documentation = "https://docs.rs/cron"
 readme = "README.md"
 description = "A cron expression parser and schedule explorer."
