@@ -7,7 +7,7 @@ mod tests {
       Schedule,
       TimeUnitSpec
     };
-    use std::collections::Bound::{
+    use std::ops::Bound::{
       Included,
       Excluded
     };
